@@ -379,6 +379,8 @@ new Float:g_FrameTimeInMsec[MAX_PLAYERS + 1];
 new g_ControlPoints[MAX_PLAYERS + 1][CP_TYPES][CP_DATA];
 new g_CpCounters[MAX_PLAYERS + 1][COUNTERS];
 new g_RunType[MAX_PLAYERS + 1][5];
+
+new g_mapName[32]; // soup
 new Float:g_Velocity[MAX_PLAYERS + 1][3];
 new Float:g_Origin[MAX_PLAYERS + 1][3];
 new Float:g_Angles[MAX_PLAYERS + 1][3];
@@ -413,6 +415,8 @@ new g_SyncHudDistance;
 new g_SyncHudSpecList;
 new g_SyncHudCupMaps;
 new g_SyncHudKzVote;
+
+new g_SyncHudCurrentMap;
 
 new g_MaxPlayers;
 new g_PauseSprite;
@@ -550,6 +554,8 @@ new pcvar_sv_ag_match_running;
 new mfwd_hlkz_cheating;
 new mfwd_hlkz_worldrecord;
 
+new PBS_PLAYERS;
+
 public plugin_precache()
 {
 	server_print("[%s] Executing plugin_precache()", PLUGIN_TAG);
@@ -557,6 +563,9 @@ public plugin_precache()
 	g_FwLightStyle = register_forward(FM_LightStyle, "Fw_FmLightStyle");
 	g_PauseSprite = precache_model("sprites/pause_icon.spr");
 	precache_model("models/player/robo/robo.mdl");
+	precache_model("models/player/gordon/gordon.mdl");
+	precache_model("models/p_shotgun.mdl");
+	precache_sound("ironanjuu/wr.wav")
 	g_Firework = precache_model("sprites/firework.spr");
 	precache_sound(FIREWORK_SOUND);
 	//precache_model("models/boxy.mdl");
@@ -583,6 +592,8 @@ public plugin_init()
 		pause("ad");
 		return;
 	}
+
+	PBS_PLAYERS = TrieCreate();
 
 	new ag_version[32];
 	get_cvar_string("sv_ag_version", ag_version, charsmax(ag_version));
@@ -683,6 +694,7 @@ public plugin_init()
 	register_clcmd("kz_setstart",		"CmdSetStartHandler",	ADMIN_CFG, "- set start position");
 	register_clcmd("kz_clearstart",		"CmdClearStartHandler",	ADMIN_CFG, "- clear start position");
 
+	register_clcmd("kz_noclip",			"NoClipCmdHandler", 		ADMIN_CFG, "- noclip");
 	// Cup and map pool stuff
 	register_clcmd("kz_cup",			"CmdCupHandler", 		ADMIN_CFG, "- start a cup match between 2 players");
 	register_clcmd("kz_cup_reset_maps",	"CmdResetCupMapStates",	ADMIN_CFG, "- resets the state of all the maps in the pool");
@@ -708,6 +720,8 @@ public plugin_init()
 	register_clcmd("say",		"CmdSayHandler");
 	register_clcmd("say_team",	"CmdSayHandler");
 	register_clcmd("spectate",	"CmdSpectateHandler");
+
+	register_clcmd("kz_pb", "CmdPbHandler")
 
 	register_clcmd("jointeam", "CmdJointeamHandler");
 
@@ -859,6 +873,7 @@ public plugin_init()
 	g_SyncHudSpecList       = CreateHudSyncObj();
 	g_SyncHudCupMaps        = CreateHudSyncObj();
 	g_SyncHudKzVote         = CreateHudSyncObj();
+	g_SyncHudCurrentMap		= CreateHudSyncObj();
 
 	g_ArrayStats[NOOB]   = ArrayCreate(STATS);
 	g_ArrayStats[PRO]    = ArrayCreate(STATS);
@@ -968,7 +983,9 @@ public plugin_cfg()
 		// This has to be done here, if the map entities have already started moving,
 		// then they simply won't stop, LOL, so stop them before that happens
 		StopMovingPlatforms();
+
 	}
+	KeepDoorsOpenOnShitMaps();
 
 	// Load map pool for kz_cup
 	formatex(g_MapPoolFile, charsmax(g_MapPoolFile), "%s/%s", g_ConfigsDir, MAP_POOL_FILE);
@@ -1552,7 +1569,7 @@ public ActionMapPickMenu(id, key)
 			WriteCupMapPoolFile(0);
 
 			// Now we're gonna change (or not) the map to start playing
-			new mapName[MAX_MAPNAME_LENGTH];
+			new mapName[32];
 			GetNextCupMapToPlay(mapName, charsmax(mapName));
 
 			if (equal(mapName, g_Map))
@@ -2090,16 +2107,62 @@ InitPlayer(id, bool:onDisconnect = false, bool:onlyTimer = false)
 public DisplayWelcomeMessage(id)
 {
 	id -= TASKID_WELCOME;
-	client_print(id, print_chat, "[%s] Welcome to %s", PLUGIN_TAG, PLUGIN);
-	client_print(id, print_chat, "[%s] Visit sourceruns.org & www.aghl.ru", PLUGIN_TAG);
-	client_print(id, print_chat, "[%s] You can say /kzhelp to see available commands", PLUGIN_TAG);
+	//client_print(id, print_chat, "[%s] Welcome to %s", PLUGIN_TAG, PLUGIN);
+	//client_print(id, print_chat, "[%s] Visit sourceruns.org & www.aghl.ru", PLUGIN_TAG);
 
+	client_print(id, print_chat, "[%s] Welcome to %s. MAP: %s", PLUGIN_TAG, PLUGIN, g_mapName);
+	client_print(id, print_chat, "[%s] Visit the pooping.men Public Mumble Server", PLUGIN_TAG);
+	client_print(id, print_chat, "[%s] You can say /kzhelp to see available commands", PLUGIN_TAG);
+	client_cmd(id, "spk ironanjuu/wr")
 	if (!get_pcvar_num(pcvar_kz_checkpoints))
 		client_print(id, print_chat, "[%s] Checkpoints are off", PLUGIN_TAG);
 
 	if (get_pcvar_num(pcvar_kz_spawn_mainmenu))
 		DisplayKzMenu(id, 0);
+
+
+	new uniqueid[32], name[32], rank;
+	new stats[STATS], insertItemId = -1, deleteItemId = -1;
+	new minutes, Float:seconds, Float:slower, Float:faster;
+
+	
+	new Float:pb, minutes_pb, Float:seconds_pb;
+	new topType = PURE;
+
+	LoadRecords(topType);
+
+	new Array:arr = g_ArrayStats[topType];
+
+	GetUserUniqueId(id, uniqueid, charsmax(uniqueid));
+	GetColorlessName(id, name, charsmax(name));
+
+	new result;
+	for (new i = 0; i < ArraySize(arr); i++)
+	{
+		ArrayGetArray(arr, i, stats);
+		//result = floatcmp(kztime, stats[STATS_TIME]);
+
+		if (result == -1 && insertItemId == -1)
+			insertItemId = i;
+
+		if (!equal(stats[STATS_ID], uniqueid))
+			continue;
+		
+		pb = stats[STATS_TIME]
+		minutes_pb = floatround(pb, floatround_floor) / 60;
+		seconds_pb = pb - (60 * minutes_pb);
+
+		client_print(id, print_chat, GetVariableDecimalMessage(id, "[%s] Your [%s] PB time is %02d:%"),
+					PLUGIN_TAG, g_TopType[topType], minutes_pb, seconds_pb);
+		
+		TrieSetCell(PBS_PLAYERS, uniqueid, pb, true);
+
+		//TrieSetCell(PBS_PLAYERS, uniqueid, GetVariableDecimalMessage(id, "Your [%s] PB time is %02d:%"), true);
+		
+		
+	}
 }
+
 
 
 
@@ -2999,6 +3062,8 @@ public CmdSayHandler(id, level, cid)
 	if (equali(args[1], "cp"))
 		CmdCp(id);
 
+	else if (equali(args[1], "pb"))
+		CmdPbHandler(id);
 	else if (equali(args[1], "tp"))
 		CmdTp(id);
 
@@ -3170,6 +3235,81 @@ public CmdSayHandler(id, level, cid)
 		return PLUGIN_CONTINUE;
 
 	return PLUGIN_HANDLED;
+}
+
+
+public CmdPbHandler(id)
+{
+	new uniqueid[32], name[32], rank;
+	new stats[STATS], insertItemId = -1, deleteItemId = -1;
+	new minutes, Float:seconds, Float:slower, Float:faster;
+
+	
+	new Float:pb, minutes_pb, Float:seconds_pb;
+	new topType = PURE;
+
+	LoadRecords(topType);
+
+	new Array:arr = g_ArrayStats[topType];
+
+	GetUserUniqueId(id, uniqueid, charsmax(uniqueid));
+	GetColorlessName(id, name, charsmax(name));
+
+	new result;
+	for (new i = 0; i < ArraySize(arr); i++)
+	{
+		ArrayGetArray(arr, i, stats);
+		//result = floatcmp(kztime, stats[STATS_TIME]);
+
+		if (result == -1 && insertItemId == -1)
+			insertItemId = i;
+
+		if (!equal(stats[STATS_ID], uniqueid))
+			continue;
+		
+		pb = stats[STATS_TIME]
+		minutes_pb = floatround(pb, floatround_floor) / 60;
+		seconds_pb = pb - (60 * minutes_pb);
+
+		client_print(id, print_chat, GetVariableDecimalMessage(id, "[%s] Your [%s] PB time is %02d:%"),
+					PLUGIN_TAG, g_TopType[topType], minutes_pb, seconds_pb);
+
+		TrieSetCell(PBS_PLAYERS, uniqueid, pb, true);
+
+		//TrieSetCell(PBS_PLAYERS, uniqueid, GetVariableDecimalMessage(id, "Your [%s] PB time is %02d:%"), true);
+		
+		
+	}
+}
+
+public NoClipCmdHandler(id,level,cid) {
+	if (!cmd_access(id, level, cid, 1))
+		return PLUGIN_HANDLED
+	
+	new arg[32], admin_name[32], target_name[32]
+	read_argv(1,arg,31)
+
+	new player = cmd_target(id,arg,14)
+	if (!player) return PLUGIN_HANDLED
+
+	get_user_name(id,admin_name,31)
+	get_user_name(player,target_name,31)
+
+	if (!get_user_noclip(player)) {
+		set_user_noclip(player,1)
+		
+	} else {
+		set_user_noclip(player)
+	}
+
+	if (get_bit(g_baIsClimbing, id))
+		ResetPlayer(id, false, true);
+
+	new ret;
+	ExecuteForward(mfwd_hlkz_cheating, ret, id);
+	
+	return PLUGIN_CONTINUE;
+
 }
 
 public CheatCmdHandler(id)
@@ -3846,7 +3986,8 @@ FinishClimb(id)
 	if (!canFinish)
 	{
 		if (kzDeniedSound)
-			client_cmd(id, "spk \"vox/access denied\"");
+			//client_cmd(id, "spk \"vox/access denied\"");
+			client_cmd(id, "spk ironanjuu/wr")
 
 		return;
 	}
@@ -3892,7 +4033,8 @@ FinishTimer(id)
 	seconds = kztime - (60 * minutes);
 	pureRun = get_bit(g_baIsPureRunning, id) ? "(Pure Run)" : "";
 
-	client_cmd(0, "spk fvox/bell");
+	//client_cmd(0, "spk fvox/bell");
+	client_cmd(0, "spk ironanjuu/wr");
 
 	get_user_name(id, name, charsmax(name));
 	client_print(0, print_chat, GetVariableDecimalMessage(id, "[%s] %s^0 finished in %02d:%0", "(CPs: %d | TPs: %d) %s%s"),
@@ -4557,6 +4699,40 @@ UpdateHud(Float:currGameTime)
 #endif // _DEBUG
 		}
 
+		new uniqueid[32], name[32], rank;
+		new stats[STATS], insertItemId = -1, deleteItemId = -1;
+		new minutes, Float:seconds, Float:slower, Float:faster;
+
+		new Float:pb, minutes_pb, Float:seconds_pb;
+		new topType = PURE;
+
+
+		GetUserUniqueId(id, uniqueid, charsmax(uniqueid));
+		GetColorlessName(id, name, charsmax(name));
+
+
+		set_hudmessage(g_HudRGB[id][0], g_HudRGB[id][1], g_HudRGB[id][2], 0.01, 0.90, 0, 0.0, 999999.0, 0.0, 0.0, -1);
+		//TrieSetCell(PBS_PLAYERS, uniqueid, GetVariableDecimalMessage(id, "Your [%s] PB time is %02d:%"), true);
+		
+		TrieGetCell(PBS_PLAYERS, uniqueid, pb);
+		minutes_pb = floatround(pb, floatround_floor) / 60;
+		seconds_pb = pb - (60 * minutes_pb);
+
+		//Your [%s] PB time is %02d:%
+		ShowSyncHudMsg(id, g_SyncHudCurrentMap, GetVariableDecimalMessage(id, "Map: %s | Your /%s/ PB: %02d:%"), g_Map, g_TopType[topType], minutes_pb, seconds_pb);	 //(%02d)
+		
+		new Float:decimals = floatfract(pb);
+		
+		//new b = floatround(decimals * 1000.0, floatround_floor);
+		new c = floatround(floatfract(pb) * 10.0, floatround_floor);
+		new secs = floatround(pb, floatround_floor);
+			
+		//client_print(id, print_chat, "[%s] pb=%f secs=%d b=%d b_as_float=%f", PLUGIN_TAG, pb, secs, c, c);
+
+
+		set_user_frags(id, secs);
+		hl_set_user_deaths(id, c);
+
 		// Show own or spectated target timer
 		if (get_bit(g_baIsClimbing, targetId) && g_ShowTimer[id])
 		{
@@ -4600,9 +4776,9 @@ UpdateHud(Float:currGameTime)
 				formatex(runModeText, charsmax(runModeText), " %s", g_RunModeString[g_RunMode[targetId]]);
 
 			new timerText[128];
-			formatex(timerText, charsmax(timerText), "%s%s run | Time: %02d:%02d | CPs: %d | TPs: %d%s%s%s%s",
+			formatex(timerText, charsmax(timerText), "%s%s run | Time: %02d:%02d | CPs: %d | TPs: %d%s%s%s%s%s",
 					g_RunType[targetId], runModeText, min, sec, g_CpCounters[targetId][COUNTER_CP], g_CpCounters[targetId][COUNTER_TP],
-					reqsText, lapsText, splitText, get_bit(g_baIsPaused, targetId) ? " | *Paused*" : "");
+					reqsText, lapsText, splitText, get_bit(g_baIsPaused, targetId) ? " | *Paused*" : "", g_Map);
 
 			switch (g_ShowTimer[id])
 			{
@@ -5844,6 +6020,22 @@ StopMovingPlatforms()
 		{
 			set_pev(movingPlatform, pev_speed, 0.0);
 			j++;
+		}
+		server_print("[%s] %d %s entities have been stopped", PLUGIN_TAG, j, classNames[i]);
+	}
+}
+
+KeepDoorsOpenOnShitMaps()
+{
+	new classNames[][] = {"func_door_rotating"};
+	for (new i = 0; i < sizeof(classNames); i++)
+	{
+		new movingPlatform = FM_NULLENT, j = 0;
+		while(movingPlatform = find_ent_by_class(movingPlatform, classNames[i]))
+		{
+			//set_pev(movingPlatform, pev_speed, 0.0);
+			//j++;
+			DispatchKeyValue(movingPlatform, "wait", 0);
 		}
 		server_print("[%s] %d %s entities have been stopped", PLUGIN_TAG, j, classNames[i]);
 	}
@@ -7325,7 +7517,7 @@ LoadMapPool()
 		new cupMap[CUP_MAP];
 
 		// One map name and state per line
-		new mapOrder[4], mapName[MAX_MAPNAME_LENGTH], mapState[3], mapPicker[3];
+		new mapOrder[4], mapName[32], mapState[3], mapPicker[3];
 		parse(buffer,
 				mapOrder,	charsmax(mapOrder),
 				mapName,	charsmax(mapName),
@@ -7645,7 +7837,8 @@ UpdateRecords(id, Float:kztime, RUN_TYPE:topType)
 	new uniqueid[32], name[32], rank;
 	new stats[STATS], insertItemId = -1, deleteItemId = -1;
 	new minutes, Float:seconds, Float:slower, Float:faster;
-	LoadRecords(topType);
+	
+	new Float:pb, minutes_pb, Float:seconds_pb;	LoadRecords(topType);
 
 	new storeInMySql = get_pcvar_num(pcvar_kz_mysql);
 	new Array:arr = g_ArrayStats[topType]; // contains the current leaderboard
@@ -7664,6 +7857,10 @@ UpdateRecords(id, Float:kztime, RUN_TYPE:topType)
 
 		if (!equal(stats[STATS_ID], uniqueid))
 			continue;
+
+		pb = stats[STATS_TIME]; // soup
+		minutes_pb = floatround(pb, floatround_floor) / 60; // soup
+		seconds_pb = pb - (60 * minutes); // soup
 
 		if (result != -1)
 		{
@@ -7703,6 +7900,16 @@ UpdateRecords(id, Float:kztime, RUN_TYPE:topType)
 		client_print(id, print_chat, GetVariableDecimalMessage(id, "[%s] You improved your %s time by %02d:%0"),
 			PLUGIN_TAG, g_TopType[topType], minutes, seconds);
 
+		new minutes_kz, Float:seconds_kz;
+		minutes_kz = floatround(kztime, floatround_floor) / 60; 
+		seconds_kz = kztime - (60 * minutes);	
+
+		if(topType == PURE)
+		{
+			TrieSetCell(PBS_PLAYERS, uniqueid, kztime, true);
+			client_print(id, print_chat, GetVariableDecimalMessage(id, "[%s] Your [%s] PB time is %02d:%0"),
+					PLUGIN_TAG, g_TopType[topType], minutes_kz, seconds_kz);		
+		}
 		deleteItemId = i;
 
 		break;
@@ -7716,6 +7923,14 @@ UpdateRecords(id, Float:kztime, RUN_TYPE:topType)
 	stats[STATS_TIME] = _:kztime;
 	stats[STATS_TIMESTAMP] = get_systime();
 
+
+	if(topType == PURE)
+	{
+		pb = stats[STATS_TIME];
+		TrieSetCell(PBS_PLAYERS, uniqueid, pb, true);
+		/*client_print(id, print_chat, GetVariableDecimalMessage(id, "![%s] Your [%s] I LIKE DICKS"),
+				PLUGIN_TAG, g_TopType[topType])*/
+	}
 	if (insertItemId != -1)
 	{
 		rank = insertItemId;
@@ -7733,8 +7948,18 @@ UpdateRecords(id, Float:kztime, RUN_TYPE:topType)
 	rank++;
 	if (rank <= get_pcvar_num(pcvar_kz_top_records))
 	{
-		client_cmd(0, "spk woop");
+		//client_cmd(0, "spk woop");
+		client_cmd(0, "spk ironanjuu/wr");
 		client_print(0, print_chat, "[%s] %s is now on place %d in %s 15", PLUGIN_TAG, name, rank, g_TopType[topType]);
+		
+		if(topType == PURE)
+		{
+			pb = stats[STATS_TIME];
+			minutes_pb = floatround(pb, floatround_floor) / 60;
+			seconds_pb = pb - (60 * minutes_pb);
+			console_print(0, "WR|%s|%s|%s|%d|%s|%i:%f", PLUGIN_TAG, name, g_Map, rank, g_TopType[topType], minutes_pb, seconds_pb);
+		}
+
 	}
 	else
 		client_print(0, print_chat, "[%s] %s's rank is %d of %d among %s players", PLUGIN_TAG, name, rank, ArraySize(arr), g_TopType[topType]);
