@@ -380,7 +380,6 @@ new g_ControlPoints[MAX_PLAYERS + 1][CP_TYPES][CP_DATA];
 new g_CpCounters[MAX_PLAYERS + 1][COUNTERS];
 new g_RunType[MAX_PLAYERS + 1][5];
 
-new g_mapName[32]; // soup
 new Float:g_Velocity[MAX_PLAYERS + 1][3];
 new Float:g_Origin[MAX_PLAYERS + 1][3];
 new Float:g_Angles[MAX_PLAYERS + 1][3];
@@ -2110,7 +2109,7 @@ public DisplayWelcomeMessage(id)
 	//client_print(id, print_chat, "[%s] Welcome to %s", PLUGIN_TAG, PLUGIN);
 	//client_print(id, print_chat, "[%s] Visit sourceruns.org & www.aghl.ru", PLUGIN_TAG);
 
-	client_print(id, print_chat, "[%s] Welcome to %s. MAP: %s", PLUGIN_TAG, PLUGIN, g_mapName);
+	client_print(id, print_chat, "[%s] Welcome to %s. MAP: %s", PLUGIN_TAG, PLUGIN, g_Map);
 	client_print(id, print_chat, "[%s] Visit the pooping.men Public Mumble Server", PLUGIN_TAG);
 	client_print(id, print_chat, "[%s] You can say /kzhelp to see available commands", PLUGIN_TAG);
 	client_cmd(id, "spk ironanjuu/wr")
@@ -2509,6 +2508,135 @@ CmdReplay(id, RUN_TYPE:runType)
 
 	return PLUGIN_HANDLED;
 }
+
+
+StartGhost(id, RUN_TYPE:runType)
+{
+	static authid[32], replayFile[256], idNumbers[24], stats[STATS], time[32];
+	new args[32], cmd[15], replayRank, replayArg[33], Regex:pattern;
+	new minutes, Float:seconds;
+	new maxReplays = get_pcvar_num(pcvar_kz_max_concurrent_replays);
+	new Float:setupTime = 0.0;
+
+	/*read_args(args, charsmax(args));
+	remove_quotes(args);
+	trim(args);
+	parse(args, cmd, charsmax(cmd), replayArg, charsmax(replayArg));*/
+
+	/*if (is_str_num(replayArg))
+		replayRank = str_to_num(replayArg);
+	else*/
+	get_user_name(id, replayArg, sizeof(replayArg));
+	
+	pattern = regex_compile_ex(fmt(".*%s.*", replayArg), PCRE_CASELESS);
+
+	LoadRecords(runType);
+	new Array:arr = g_ArrayStats[runType];
+
+	for (new i = 0; i < ArraySize(arr); i++)
+	{
+		ArrayGetArray(arr, i, stats);
+		if ((replayRank && i == replayRank - 1) || (pattern == 1 && regex_match_c(stats[STATS_NAME], pattern) == 1))
+		{
+			stats[STATS_NAME][17] = EOS;
+			formatex(authid, charsmax(authid), "%s", stats[STATS_ID]);
+			break; // the desired record info is now stored in stats, so exit loop
+		}
+	}
+	if (!replayRank)
+		regex_free(pattern);
+
+	new replayingMsg[96], replayFailedMsg[96], szTopType[32];
+	ConvertSteamID32ToNumbers(authid, idNumbers);
+	formatex(szTopType, charsmax(szTopType), g_TopType[runType]);
+	strtolower(szTopType);
+	formatex(replayFile, charsmax(replayFile), "%s/%s_%s_%s.dat", g_ReplaysDir, g_Map, idNumbers, szTopType);
+	//formatex(g_ReplayFile[id], charsmax(replayFile), "%s", replayFile);
+	//console_print(id, "rank %d's idNumbers: '%s', replay file: '%s'", replayRank, idNumbers, replayFile);
+
+	minutes = floatround(stats[STATS_TIME], floatround_floor) / 60;
+	seconds = stats[STATS_TIME] - (60 * minutes);
+
+	formatex(time, charsmax(time), GetVariableDecimalMessage(id, "%02d:%0"), minutes, seconds);
+	ucfirst(szTopType);
+	formatex(replayingMsg, charsmax(replayingMsg), "[%s] Replaying %s's %s run (%ss)", PLUGIN_TAG, stats[STATS_NAME], szTopType, time);
+	formatex(replayFailedMsg, charsmax(replayFailedMsg), "[%s] Sorry, no replay available for %s's %s run", PLUGIN_TAG, stats[STATS_NAME], szTopType);
+
+	new file = fopen(replayFile, "rb");
+	if (!file && runType == PRO && ComparePro2PureTime(stats[STATS_ID], stats[STATS_TIME]) == 0)
+	{
+		formatex(replayFile, charsmax(replayFile), "%s/%s_%s_pure.dat", g_ReplaysDir, g_Map, idNumbers);
+		file = fopen(replayFile, "rb");
+	}
+	if (!file)
+	{
+		client_print(id, print_chat, "%s", replayFailedMsg);
+		return PLUGIN_HANDLED;
+	}
+	else
+	{
+		new bool:canceled = false;
+		if (g_ReplayFramesIdx[id])
+		{
+			new bot = GetOwnersBot(id);
+			//console_print(1, "CmdReplay :: removing bot %d", bot);
+			FinishReplay(id);
+			KickReplayBot(bot + TASKID_KICK_REPLAYBOT);
+			canceled = true;
+		}
+
+		if (g_ReplayNum >= maxReplays)
+		{
+			client_print(id, print_chat, "[%s] Sorry, there are too many replays running! Please, wait until one of the %d replays finish", PLUGIN_TAG, g_ReplayNum);
+			fclose(file);
+			return PLUGIN_HANDLED;
+		}
+		else if (GetOwnersBot(id))
+		{
+			client_print(id, print_chat, "[%s] Your previous bot is still setting up. Please, wait %.1f seconds to start a new replay", PLUGIN_TAG, setupTime);
+			fclose(file);
+			return PLUGIN_HANDLED;
+		}
+
+		if (canceled)
+			client_print(id, print_chat, "[%s] Your previous replay has been canceled. Initializing the replay you've just requested...", PLUGIN_TAG);
+
+		client_print(id, print_chat, "%s", replayingMsg);
+	}
+
+	if (!g_ReplayFramesIdx[id])
+	{
+		new replay[REPLAY], replay0[REPLAY];
+
+		ArrayClear(g_ReplayFrames[id]);
+		//console_print(id, "gonna read the replay file");
+
+		//fread(file, version, BLOCK_SHORT);
+		//console_print(1, "replaying demo of version %d", version);
+
+		new i = 0;
+		while (!feof(file))
+		{
+			fread_blocks(file, replay, sizeof(replay) - 1, BLOCK_INT);
+			fread(file, replay[RP_BUTTONS], BLOCK_SHORT);
+			ArrayPushArray(g_ReplayFrames[id], replay);
+			i++;
+		}
+		fclose(file);
+		ArrayGetArray(g_ReplayFrames[id], 0, replay0);
+		// ((1483.79 - 1452.84) / 7630) * 1
+		new Float:demoFramerate = 1.0 / ((replay[RP_TIME] - replay0[RP_TIME]) / float(i)) * float(g_ReplayFpsMultiplier[id]);
+		//console_print(id, "%.3f = 1.0 / ((%.3f - %.3f) / %.3f) * %.3f", demoFramerate, replay[RP_TIME], replay0[RP_TIME], float(i), float(g_ReplayFpsMultiplier[id]));
+
+		g_ReplayNum++;
+		SpawnBot(id);
+		client_print(id, print_chat, "[%s] Your bot will start running at %.2f fps (on average) in %.1f seconds", PLUGIN_TAG, demoFramerate, setupTime);
+		//console_print(1, "replayft=%.3f, replay0t=%.2f, i=%d, mult=%d", replay[RP_TIME], replay0[RP_TIME], i, g_ReplayFpsMultiplier[id]);
+	}
+
+	return PLUGIN_HANDLED;
+}
+
 
 SpawnBot(id)
 {
@@ -4017,9 +4145,11 @@ StartTimer(id)
 			formatex(msg, charsmax(msg), "Race started!");
 		else
 			formatex(msg, charsmax(msg), "Timer started with speed %5.2fu/s", speed);
+			
 
 		ShowMessage(id, msg);
 	}
+	//StartGhost(id, PURE);
 
 	//console_print(id, "gametime: %.5f", get_gametime());
 }
@@ -4685,7 +4815,7 @@ UpdateHud(Float:currGameTime)
 			new BUTTON_TYPE:type = GetEntityButtonType(ent);
 			switch (type)
 			{
-				case BUTTON_START: ShowInHealthHud(id, "START");
+				case BUTTON_START: ShowInHealthHud(id, "START"); 
 				case BUTTON_FINISH: ShowInHealthHud(id, "STOP");
 				case BUTTON_SPLIT: ShowInHealthHud(id, "SPLIT");
 			}
@@ -4776,7 +4906,7 @@ UpdateHud(Float:currGameTime)
 				formatex(runModeText, charsmax(runModeText), " %s", g_RunModeString[g_RunMode[targetId]]);
 
 			new timerText[128];
-			formatex(timerText, charsmax(timerText), "%s%s run | Time: %02d:%02d | CPs: %d | TPs: %d%s%s%s%s%s",
+			formatex(timerText, charsmax(timerText), "%s%s run | Time: %02d:%02d | CPs: %d | TPs: %d%s%s%s%s | Map: %s",
 					g_RunType[targetId], runModeText, min, sec, g_CpCounters[targetId][COUNTER_CP], g_CpCounters[targetId][COUNTER_TP],
 					reqsText, lapsText, splitText, get_bit(g_baIsPaused, targetId) ? " | *Paused*" : "", g_Map);
 
@@ -5962,8 +6092,8 @@ public Fw_FmLightStyle(style, const value[]) {
 //*                                                     *
 //*******************************************************
 
-/*
-kz_create_button(id, type, Float:pOrigin[3] = {0.0, 0.0, 0.0})
+
+/*kz_create_button(id, type, Float:pOrigin[3] = {0.0, 0.0, 0.0})
 {
 	new ent= engfunc(EngFunc_CreateNamedEntity, engfunc(EngFunc_AllocString, "func_button"));
 	if (!pev_valid(ent))
@@ -5995,8 +6125,8 @@ kz_create_button(id, type, Float:pOrigin[3] = {0.0, 0.0, 0.0})
 	}
 
 	return PLUGIN_HANDLED;
-}
-// */
+}*/
+// 
 
 RemoveFuncFriction()
 {
