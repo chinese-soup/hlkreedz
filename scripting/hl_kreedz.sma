@@ -416,6 +416,7 @@ new g_SyncHudCupMaps;
 new g_SyncHudKzVote;
 
 new g_SyncHudCurrentMap;
+new g_SyncHudRightBottomCorner;
 
 new g_MaxPlayers;
 new g_PauseSprite;
@@ -554,6 +555,8 @@ new mfwd_hlkz_cheating;
 new mfwd_hlkz_worldrecord;
 
 new PBS_PLAYERS;
+new RESETS_PLAYERS;
+new RESETS_PLAYERS_EXPIRE;
 
 public plugin_precache()
 {
@@ -593,6 +596,8 @@ public plugin_init()
 	}
 
 	PBS_PLAYERS = TrieCreate();
+	RESETS_PLAYERS = TrieCreate();
+	RESETS_PLAYERS_EXPIRE = TrieCreate();
 
 	new ag_version[32];
 	get_cvar_string("sv_ag_version", ag_version, charsmax(ag_version));
@@ -873,6 +878,7 @@ public plugin_init()
 	g_SyncHudCupMaps        = CreateHudSyncObj();
 	g_SyncHudKzVote         = CreateHudSyncObj();
 	g_SyncHudCurrentMap		= CreateHudSyncObj();
+	g_SyncHudRightBottomCorner = CreateHudSyncObj();
 
 	g_ArrayStats[NOOB]   = ArrayCreate(STATS);
 	g_ArrayStats[PRO]    = ArrayCreate(STATS);
@@ -1847,6 +1853,9 @@ public client_putinserver(id)
 
 	LoadPlayerSettings(id);
 
+	TrieSetCell(RESETS_PLAYERS, uniqueId, 0);
+	TrieSetCell(RESETS_PLAYERS_EXPIRE, uniqueId, true);
+	
 	set_task(1.20, "DisplayWelcomeMessage", id + TASKID_WELCOME);
 }
 
@@ -2085,8 +2094,8 @@ InitPlayer(id, bool:onDisconnect = false, bool:onlyTimer = false)
 			return;
 
 		// Reset score
-		ExecuteHamB(Ham_AddPoints, id, -(pev(id, pev_frags)), true);
-
+		// ExecuteHamB(Ham_AddPoints, id, -(pev(id, pev_frags)), true);
+		
 		// Reset health
 		new Float:health;
 		pev(id, pev_health, health);
@@ -4124,6 +4133,18 @@ FinishClimb(id)
 	InitPlayer(id);
 }
 
+public ResetAttempCountTimer(id)
+{
+	new bool:expired;
+	new uniqueid[32];
+	GetUserUniqueId(id - 444, uniqueid, charsmax(uniqueid));
+
+	console_print(0, "uhhh %d is now set to true", id);
+	TrieSetCell(RESETS_PLAYERS_EXPIRE, uniqueid, true);
+	
+}
+
+
 StartTimer(id)
 {
 	new Float:velocity[3];
@@ -4150,6 +4171,36 @@ StartTimer(id)
 		ShowMessage(id, msg);
 	}
 	//StartGhost(id, PURE);
+	
+
+	new uniqueid[32];
+	new attempts;
+	new bool:expired;
+	GetUserUniqueId(id, uniqueid, charsmax(uniqueid));
+	
+	TrieGetCell(RESETS_PLAYERS_EXPIRE, uniqueid, expired);
+
+	if(expired == false)
+	{
+		remove_task(id + 444);
+		set_task(1.0, "ResetAttempCountTimer", id + 444);//, uniqueid, charsmax(uniqueid)); 
+		//console_print(0, "expired = false, starting timer");
+	}
+	else
+	{
+		//console_print(0, "expired = true, starting timer");
+		new result = TrieGetCell(RESETS_PLAYERS, uniqueid, attempts);
+		attempts = attempts + 1;
+		TrieSetCell(RESETS_PLAYERS, uniqueid, attempts);
+		//console_print(0, "set expired to FALSE");
+		TrieSetCell(RESETS_PLAYERS_EXPIRE, uniqueid, false);	
+		remove_task(id + 444);
+		set_task(1.0, "ResetAttempCountTimer", id + 444);//, uniqueid, charsmax(uniqueid)); 
+	}
+
+	
+
+
 
 	//console_print(id, "gametime: %.5f", get_gametime());
 }
@@ -4834,6 +4885,7 @@ UpdateHud(Float:currGameTime)
 		new minutes, Float:seconds, Float:slower, Float:faster;
 
 		new Float:pb, minutes_pb, Float:seconds_pb;
+		new resets_count;
 		new topType = PURE;
 
 
@@ -4845,11 +4897,15 @@ UpdateHud(Float:currGameTime)
 		//TrieSetCell(PBS_PLAYERS, uniqueid, GetVariableDecimalMessage(id, "Your [%s] PB time is %02d:%"), true);
 		
 		TrieGetCell(PBS_PLAYERS, uniqueid, pb);
+		TrieGetCell(RESETS_PLAYERS, uniqueid, resets_count);
 		minutes_pb = floatround(pb, floatround_floor) / 60;
 		seconds_pb = pb - (60 * minutes_pb);
 
 		//Your [%s] PB time is %02d:%
-		ShowSyncHudMsg(id, g_SyncHudCurrentMap, GetVariableDecimalMessage(id, "Map: %s | Your /%s/ PB: %02d:%"), g_Map, g_TopType[topType], minutes_pb, seconds_pb);	 //(%02d)
+		ShowSyncHudMsg(id, g_SyncHudCurrentMap, GetVariableDecimalMessage(id, "Map: %s | /%s/ PB: %02d:%"), g_Map, g_TopType[topType], minutes_pb, seconds_pb);	 //(%02d)
+		
+		set_hudmessage(g_HudRGB[id][0], g_HudRGB[id][1], g_HudRGB[id][2], 0.96, 0.90, 0, 0.0, 999999.0, 0.0, 0.0, -1);
+		ShowSyncHudMsg(id, g_SyncHudRightBottomCorner, "Resets this session: %d", resets_count);	 //(%02d)
 		
 		new Float:decimals = floatfract(pb);
 		
