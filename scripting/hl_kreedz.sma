@@ -6489,7 +6489,7 @@ CmdCancelNoReset(id)
 
 CmdStartNoReset(id)
 {
-	if (g_RunMode[id] != MODE_NORMAL)
+	/*if (g_RunMode[id] != MODE_NORMAL)
 	{
 		ShowMessage(id, "A match is already running. Please, try again later");
 		return PLUGIN_HANDLED;
@@ -6527,7 +6527,9 @@ CmdStartNoReset(id)
 			GetColorlessName(id, targetPlayerName, charsmax(targetPlayerName));
 			client_print(id2, print_chat, "[%s] %s is starting a No-Reset run in %.1f seconds!", PLUGIN_TAG, targetPlayerName, g_RunCountdown[id]);
 		}
-	}
+	}*/
+
+	ShowMessage(id, "No reset runs are not enabled on this server.");
 
 	return PLUGIN_HANDLED;
 }
