@@ -812,6 +812,7 @@ public plugin_init()
 	RegisterHam(Ham_Weapon_PrimaryAttack,	"weapon_satchel",		"Fw_HamBoostAttack");
 	RegisterHam(Ham_Weapon_PrimaryAttack,	"weapon_snark",			"Fw_HamBoostAttack");
 	RegisterHam(Ham_Weapon_PrimaryAttack,	"weapon_tripmine",		"Fw_HamBoostAttack");
+	RegisterHam(Ham_Weapon_SecondaryAttack,	"weapon_crowbar",		"Fw_HamCrowbarAttack");
 	RegisterHam(Ham_Weapon_SecondaryAttack,	"weapon_9mmAR",			"Fw_HamBoostAttack");
 	RegisterHam(Ham_Weapon_SecondaryAttack,	"weapon_gauss",			"Fw_HamBoostAttack");
 	RegisterHam(Ham_Weapon_SecondaryAttack,	"weapon_satchel",		"Fw_HamBoostAttack");
@@ -991,6 +992,7 @@ public plugin_cfg()
 
 	}
 	KeepDoorsOpenOnShitMaps();
+	SetBreakablesToOneHealth();
 
 	// Load map pool for kz_cup
 	formatex(g_MapPoolFile, charsmax(g_MapPoolFile), "%s/%s", g_ConfigsDir, MAP_POOL_FILE);
@@ -2121,7 +2123,8 @@ public DisplayWelcomeMessage(id)
 	client_print(id, print_chat, "[%s] Welcome to %s. MAP: %s", PLUGIN_TAG, PLUGIN, g_Map);
 	client_print(id, print_chat, "[%s] Visit the pooping.men Public Mumble Server", PLUGIN_TAG);
 	client_print(id, print_chat, "[%s] You can say /kzhelp to see available commands", PLUGIN_TAG);
-	client_cmd(id, "spk ironanjuu/wr")
+	//client_cmd(id, "spk ironanjuu/wr")
+	
 	if (!get_pcvar_num(pcvar_kz_checkpoints))
 		client_print(id, print_chat, "[%s] Checkpoints are off", PLUGIN_TAG);
 
@@ -2139,15 +2142,15 @@ public DisplayWelcomeMessage(id)
 
 	LoadRecords(topType);
 
-	new Array:arr = g_ArrayStats[topType];
+	//new Array:arr =;
 
 	GetUserUniqueId(id, uniqueid, charsmax(uniqueid));
 	GetColorlessName(id, name, charsmax(name));
 
 	new result;
-	for (new i = 0; i < ArraySize(arr); i++)
+	for (new i = 1; i < ArraySize(g_ArrayStats[PURE]); i++)
 	{
-		ArrayGetArray(arr, i, stats);
+		ArrayGetArray( g_ArrayStats[PURE], i, stats);
 		//result = floatcmp(kztime, stats[STATS_TIME]);
 
 		if (result == -1 && insertItemId == -1)
@@ -2166,7 +2169,6 @@ public DisplayWelcomeMessage(id)
 		TrieSetCell(PBS_PLAYERS, uniqueid, pb, true);
 
 		//TrieSetCell(PBS_PLAYERS, uniqueid, GetVariableDecimalMessage(id, "Your [%s] PB time is %02d:%"), true);
-		
 		
 	}
 }
@@ -2509,8 +2511,11 @@ CmdReplay(id, RUN_TYPE:runType)
 		new Float:demoFramerate = 1.0 / ((replay[RP_TIME] - replay0[RP_TIME]) / float(i)) * float(g_ReplayFpsMultiplier[id]);
 		//console_print(id, "%.3f = 1.0 / ((%.3f - %.3f) / %.3f) * %.3f", demoFramerate, replay[RP_TIME], replay0[RP_TIME], float(i), float(g_ReplayFpsMultiplier[id]));
 
+		new bot_name_suffix[512];
+		formatex(bot_name_suffix, charsmax(bot_name_suffix), "%s - %ss", stats[STATS_NAME], time);
+
 		g_ReplayNum++;
-		SpawnBot(id);
+		SpawnBot(id, bot_name_suffix);
 		client_print(id, print_chat, "[%s] Your bot will start running at %.2f fps (on average) in %.1f seconds", PLUGIN_TAG, demoFramerate, setupTime);
 		//console_print(1, "replayft=%.3f, replay0t=%.2f, i=%d, mult=%d", replay[RP_TIME], replay0[RP_TIME], i, g_ReplayFpsMultiplier[id]);
 	}
@@ -2519,7 +2524,7 @@ CmdReplay(id, RUN_TYPE:runType)
 }
 
 
-StartGhost(id, RUN_TYPE:runType)
+/*StartGhost(id, RUN_TYPE:runType)
 {
 	static authid[32], replayFile[256], idNumbers[24], stats[STATS], time[32];
 	new args[32], cmd[15], replayRank, replayArg[33], Regex:pattern;
@@ -2534,7 +2539,7 @@ StartGhost(id, RUN_TYPE:runType)
 
 	/*if (is_str_num(replayArg))
 		replayRank = str_to_num(replayArg);
-	else*/
+	else
 	get_user_name(id, replayArg, sizeof(replayArg));
 	
 	pattern = regex_compile_ex(fmt(".*%s.*", replayArg), PCRE_CASELESS);
@@ -2638,27 +2643,29 @@ StartGhost(id, RUN_TYPE:runType)
 		//console_print(id, "%.3f = 1.0 / ((%.3f - %.3f) / %.3f) * %.3f", demoFramerate, replay[RP_TIME], replay0[RP_TIME], float(i), float(g_ReplayFpsMultiplier[id]));
 
 		g_ReplayNum++;
-		SpawnBot(id);
+		SpawnBot(id, );
 		client_print(id, print_chat, "[%s] Your bot will start running at %.2f fps (on average) in %.1f seconds", PLUGIN_TAG, demoFramerate, setupTime);
 		//console_print(1, "replayft=%.3f, replay0t=%.2f, i=%d, mult=%d", replay[RP_TIME], replay0[RP_TIME], i, g_ReplayFpsMultiplier[id]);
 	}
 
 	return PLUGIN_HANDLED;
-}
+}*/
 
 
-SpawnBot(id)
+SpawnBot(id, bot_name_suffix[])
 {
 	if (get_playersnum(1) < g_MaxPlayers - 4) // leave at least 4 slots available
 	{
 		new botName[33];
-		formatex(botName, charsmax(botName), "%s Bot ", PLUGIN_TAG);
-		for (new i = 0; i < 4; i++)
+		formatex(botName, charsmax(botName), "BOT: ", PLUGIN_TAG);
+		add(botName, charsmax(botName), bot_name_suffix);
+		/*for (new i = 0; i < 3; i++)
 		{ // Generate a random number 4 times, so the final name is like Bot 0123
 			new str[2];
 			num_to_str(random_num(0, 9), str, charsmax(str));
 			add(botName, charsmax(botName), str);
-		}
+		}*/
+
 		new bot;
 		bot = engfunc(EngFunc_CreateFakeClient, botName);
 		if (bot)
@@ -5437,6 +5444,19 @@ public Fw_HamBoostAttack(weaponId)
 	return PLUGIN_CONTINUE;
 }
 
+public Fw_HamCrowbarAttack(weaponId)
+{
+	//new ownerId = pev(weaponId, pev_owner);
+	//PunishPlayerCheatingWithWeapons(ownerId);
+	new timerText[128];
+	new ownerId = pev(weaponId, pev_owner);
+	formatex(timerText, charsmax(timerText), "Electric crowbar is only for donors!");
+
+	client_print(ownerId, print_center, timerText);
+
+	return PLUGIN_CONTINUE;
+}
+
 public Fw_HamItemRespawn(itemId)
 {
 	new Float:respawnTime = get_pcvar_float(pcvar_sv_items_respawn_time);
@@ -6224,6 +6244,22 @@ KeepDoorsOpenOnShitMaps()
 			DispatchKeyValue(movingPlatform, "wait", 0);
 		}
 		server_print("[%s] %d %s entities have been stopped", PLUGIN_TAG, j, classNames[i]);
+	}
+}
+
+SetBreakablesToOneHealth()
+{
+	new classNames[][] = {"func_breakable"};
+	for (new i = 0; i < sizeof(classNames); i++)
+	{
+		new movingPlatform = FM_NULLENT, j = 0;
+		while(movingPlatform = find_ent_by_class(movingPlatform, classNames[i]))
+		{
+			//set_pev(movingPlatform, pev_speed, 0.0);
+			//j++;
+			DispatchKeyValue(movingPlatform, "health", 1);
+		}
+		server_print("[%s] %d %s entities set health to 1", PLUGIN_TAG, j, classNames[i]);
 	}
 }
 
