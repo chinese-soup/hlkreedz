@@ -2240,9 +2240,15 @@ CmdStart(id, bool:isNoReset = false)
 	else
 	{
 		if (CanTeleport(id, CP_TYPE_START))
+		{
 			Teleport(id, CP_TYPE_START);
+			ResetPlayer(id, false, true);
+		}
 		else if (CanTeleport(id, CP_TYPE_DEFAULT_START))
+		{
 			Teleport(id, CP_TYPE_DEFAULT_START);
+			ResetPlayer(id, false, true);
+		}
 	}
 }
 
