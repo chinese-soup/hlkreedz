@@ -334,6 +334,7 @@ new Array:g_LapTimes[MAX_PLAYERS + 1];   // lap # -> time
 new Array:g_OrderedSplits;               // split # -> split id
 new g_CurrentLap[MAX_PLAYERS + 1];       // 1-indexed, 0 means player's not running or the map doesn't allow laps
 new g_RunLaps;                           // how many laps players have to do to complete a run
+new g_SplitMrdka_ANO;
 
 // These are for No-Reset runs, races and matches (agstart)
 new g_RaceId[MAX_PLAYERS + 1];
@@ -567,7 +568,8 @@ public plugin_precache()
 	precache_model("models/player/robo/robo.mdl");
 	precache_model("models/player/gordon/gordon.mdl");
 	precache_model("models/p_shotgun.mdl");
-	precache_sound("ironanjuu/wr.wav")
+	precache_sound("ironanjuu/wr.wav");
+	precache_sound("ironanjuu/cardrip.wav");
 	g_Firework = precache_model("sprites/firework.spr");
 	precache_sound(FIREWORK_SOUND);
 	//precache_model("models/boxy.mdl");
@@ -579,12 +581,27 @@ public plugin_precache()
 	g_Splits        = TrieCreate();
 }
 
+
+new g_msgHideWeapon;
+new g_msgCrosshair; 
+
+public eResetHUD( id ) {
+    if( !is_user_bot( id ) ) {
+        message_begin( MSG_ONE_UNRELIABLE, g_msgHideWeapon, _, id );
+        write_byte( ( 1 << 3 | 1 << 5 ) );
+        message_end();
+        
+    }
+}  
+
 public plugin_init()
 {
 	server_print("[%s] Executing plugin_init()", PLUGIN_TAG);
 
 	register_plugin(PLUGIN, VERSION, AUTHOR);
 	register_cvar("hlkreedz_version", VERSION, FCVAR_SPONLY | FCVAR_SERVER | FCVAR_UNLOGGED);
+
+    g_msgHideWeapon    = get_user_msgid( "HideWeapon" ); 
 
 	new ag_gamemode[32];
 	get_cvar_string("sv_ag_gamemode", ag_gamemode, charsmax(ag_gamemode));
@@ -887,16 +904,24 @@ public plugin_init()
 	g_NoResetLeaderboard = ArrayCreate(NORESET);
 
 	g_OrderedSplits = ArrayCreate(17, 3);
+	
+    register_event( "ResetHUD", "eResetHUD", "be" ); 
 
 	new split[SPLIT];
 
-	//server_print("Unsorted splits:");
+	/*new split2[SPLIT];
+	copy(split2[SPLIT_ID], charsmax(split[SPLIT_ID]), "0");
+	copy(split2[SPLIT_NAME], charsmax(split[SPLIT_NAME]), "0");
+
+	TrieSetArray(g_Splits, "0", split2, sizeof(split2));*/
+
+	server_print("Unsorted splits:");
 	new TrieIter:ti = TrieIterCreate(g_Splits);
 	while (!TrieIterEnded(ti))
 	{
 		TrieIterGetArray(ti, split, sizeof(split));
 
-		//server_print("%s (%d, %s, %d)", split[SPLIT_ID], split[SPLIT_ENTITY], split[SPLIT_NAME], split[SPLIT_LAP_START]);
+		server_print("%s (%d, %s, %d)", split[SPLIT_ID], split[SPLIT_ENTITY], split[SPLIT_NAME], split[SPLIT_LAP_START]);
 
 		TrieIterNext(ti);
 	}
@@ -1779,6 +1804,7 @@ public client_putinserver(id)
 	if (is_user_bot(id))
 		set_bit(g_bit_is_bot, id);
 
+    g_msgHideWeapon    = get_user_msgid( "HideWeapon" ); 
 	g_ShowTimer[id] = get_pcvar_num(pcvar_kz_show_timer);
 	g_ShowKeys[id] = get_pcvar_num(pcvar_kz_show_keys);
 	g_ShowStartMsg[id] = get_pcvar_num(pcvar_kz_show_start_msg);
@@ -2048,6 +2074,12 @@ ResetPlayer(id, bool:onDisconnect = false, bool:onlyTimer = false)
 	UnfreezePlayer(id);
 
 	InitPlayer(id, onDisconnect, onlyTimer);
+
+	 if( !is_user_bot( id ) ) {
+        message_begin( MSG_ONE_UNRELIABLE, g_msgHideWeapon, _, id );
+        write_byte( ( 1 << 3 | 1 << 5 ) );
+        message_end();
+    }
 
 	if (!onDisconnect)
 	{
@@ -4906,7 +4938,7 @@ UpdateHud(Float:currGameTime)
 		GetColorlessName(id, name, charsmax(name));
 
 
-		set_hudmessage(g_HudRGB[id][0], g_HudRGB[id][1], g_HudRGB[id][2], 0.01, 0.90, 0, 0.0, 999999.0, 0.0, 0.0, -1);
+		set_hudmessage(g_HudRGB[id][0], g_HudRGB[id][1], g_HudRGB[id][2], 0.01, 0.98, 0, 0.0, 999999.0, 0.0, 0.0, -1);
 		//TrieSetCell(PBS_PLAYERS, uniqueid, GetVariableDecimalMessage(id, "Your [%s] PB time is %02d:%"), true);
 		
 		TrieGetCell(PBS_PLAYERS, uniqueid, pb);
@@ -4917,7 +4949,7 @@ UpdateHud(Float:currGameTime)
 		//Your [%s] PB time is %02d:%
 		ShowSyncHudMsg(id, g_SyncHudCurrentMap, GetVariableDecimalMessage(id, "Map: %s | /%s/ PB: %02d:%"), g_Map, g_TopType[topType], minutes_pb, seconds_pb);	 //(%02d)
 		
-		set_hudmessage(g_HudRGB[id][0], g_HudRGB[id][1], g_HudRGB[id][2], 0.96, 0.90, 0, 0.0, 999999.0, 0.0, 0.0, -1);
+		set_hudmessage(g_HudRGB[id][0], g_HudRGB[id][1], g_HudRGB[id][2], 0.97, 0.90, 0, 0.0, 999999.0, 0.0, 0.0, -1);
 		ShowSyncHudMsg(id, g_SyncHudRightBottomCorner, "Resets this session: %d", resets_count);	 //(%02d)
 		
 		new Float:decimals = floatfract(pb);
@@ -4975,10 +5007,18 @@ UpdateHud(Float:currGameTime)
 				formatex(runModeText, charsmax(runModeText), " %s", g_RunModeString[g_RunMode[targetId]]);
 
 			new timerText[128];
-			formatex(timerText, charsmax(timerText), "%s%s run | Time: %02d:%02d | CPs: %d | TPs: %d%s%s%s%s | Map: %s",
+			if( g_CpCounters[targetId][COUNTER_CP] == 0 && g_CpCounters[targetId][COUNTER_TP] == 0)
+			{
+				formatex(timerText, charsmax(timerText), "%s%s run | Time: %02d:%02d%s%s%s%s | Map: %s",
+					g_RunType[targetId], runModeText, min, sec, 
+					reqsText, lapsText, splitText, get_bit(g_baIsPaused, targetId) ? " | *Paused*" : "", g_Map);
+			}
+			else
+			{
+				formatex(timerText, charsmax(timerText), "%s%s run | Time: %02d:%02d | CPs: %d | TPs: %d%s%s%s%s | Map: %s",
 					g_RunType[targetId], runModeText, min, sec, g_CpCounters[targetId][COUNTER_CP], g_CpCounters[targetId][COUNTER_TP],
 					reqsText, lapsText, splitText, get_bit(g_baIsPaused, targetId) ? " | *Paused*" : "", g_Map);
-
+			}
 			switch (g_ShowTimer[id])
 			{
 			case 1:
@@ -5524,9 +5564,85 @@ public Fw_FmKeyValuePre(ent, kvd)
 	{
 		GetSplitsFromMap(ent, kvd);
 	}
+	else if (equali(className, "info_checkpoint"))
+	{
+		server_print("OH SHIT INFO CHECKPOINT");
+		GetSplitsFromMap2(ent, kvd);
+	}
 
 	return FMRES_IGNORED;
 }
+
+
+/**
+ * Gets and stores splits that were created directly in the map (compiled with them),
+ * via trigger_multiple entities with specific properties. This will get called
+ * for each key->value pair of any trigger_multiple
+ */
+GetSplitsFromMap2(ent, kvd)
+{
+	new key[32], value[32], split[SPLIT];
+	get_kvd(kvd, KV_KeyName, key, charsmax(key));
+	get_kvd(kvd, KV_Value, value, charsmax(value));
+
+	if (!GetSplitByEntityId(ent, split))
+	{
+		split[SPLIT_ENTITY] = ent;
+	}
+
+	if (equal(key, "number"))
+	{
+		g_RunLaps = 2;
+		
+		new lal = str_to_num(value) + 1;
+		new blah[24];
+		num_to_str(lal, blah, charsmax(blah));
+
+		copy(split[SPLIT_NEXT], charsmax(split[SPLIT_NEXT]), blah);
+		server_print("SPLIT NEXT = %s", split[SPLIT_NEXT]);
+		copy(split[SPLIT_ID], charsmax(split[SPLIT_ID]), value);
+
+		copy(split[SPLIT_NAME], charsmax(split[SPLIT_NAME]), value);
+
+		//copy(split[SPLIT_NEXT], charsmax(split[SPLIT_NEXT]), value);
+		// Now that we have the proper split id, we remove the entry for this split
+		// that has the entity id as the key, and a new entry will be created later with the split id as the key instead
+		new entityId[5];
+		num_to_str(ent, entityId, charsmax(entityId));
+		TrieDeleteKey(g_Splits, entityId);
+	}
+	else if(equal(key, "timeextension"))
+	{
+		return;
+	}
+	else if(equal(key, "model"))
+	{
+		return;
+	}
+	else if(equal(key, "classname"))
+	{
+		return;
+	}
+	else
+	{
+		return;
+	}
+
+	new trieKey[32];
+
+	// The trie key will be either the split_id value if we already got it, or the entity number (stringified)
+	if (split[SPLIT_ID][0])
+		copy(trieKey, charsmax(trieKey), split[SPLIT_ID]);
+	else
+	{
+		num_to_str(ent, trieKey, charsmax(trieKey));
+	}
+		
+	server_print("[GetSplits] trieKey: %s | key: %s | value: %s", trieKey, key, value);
+
+	TrieSetArray(g_Splits, trieKey, split, sizeof(split));
+}
+
 
 /**
  * Gets and stores splits that were created directly in the map (compiled with them),
@@ -6293,27 +6409,65 @@ SortSplits()
 	}
 	TrieIterDestroy(ti);
 
+
 	if (!firstId[0])
 	{
 		// This map has no splits
 		return;
 	}
+	new i = str_to_num(split[SPLIT_ID]);
+	new size = TrieGetSize(g_Splits);
+	server_print("Size = %d", size);
+	
+	new split_next[SPLIT];
+	TrieGetCell(g_Splits, "1", split_next);
 
-	// Splits have a property pointing to the next split a player should go through to continue the run
-	// So we check that to jump from split to split, until the first split is found again or there's no next split
-	do
+	server_print("HAHAHA ", split_next[SPLIT_ID])
+
+	while(true)
 	{
-		if (FindNextSplit(split, split))
+		server_print("i BEFORE = %d", i);
+		i += 1;
+		server_print("i AFTER = %d", i);
+
+		if(i == size)
+		{
+			break;
+		}
+
+		new mrdat[32];
+		num_to_str(i, mrdat, charsmax(mrdat));
+		
+		if(split[SPLIT_ID][0])
 		{
 			ArrayPushString(g_OrderedSplits, split[SPLIT_ID]);
 		}
 	}
-	while (!equal(firstId, split[SPLIT_NEXT]));
+
+	// Splits have a property pointing to the next split a player should go through to continue the run
+	// So we check that to jump from split to split, until the first split is found again or there's no next split
+	/*do
+	{
+		if (FindNextSplit(split, split))
+		{
+			server_print("We ended here");
+			ArrayPushString(g_OrderedSplits, split[SPLIT_ID]);
+		}
+	}
+	while (!equal(firstId, split[SPLIT_NEXT]));*/
 }
 
 bool:IsFirstSplit(split[])
 {
-	return bool:split[SPLIT_LAP_START];
+	if(equal(split[SPLIT_ID], "1"))
+	{
+		return true;
+	}
+	else
+	{
+
+		return bool:split[SPLIT_LAP_START];
+	}
 }
 
 bool:FindNextSplit(prev[], result[])
