@@ -579,10 +579,24 @@ public plugin_precache()
 	g_Splits        = TrieCreate();
 }
 
+new g_msgHideWeapon;
+new g_msgCrosshair; 
+
+public eResetHUD( id ) {
+    if( !is_user_bot( id ) ) {
+        message_begin( MSG_ONE_UNRELIABLE, g_msgHideWeapon, _, id );
+        write_byte( ( 1 << 3 | 1 << 5 ) );
+        message_end();
+        
+    }
+}  
+
 public plugin_init()
 {
 	server_print("[%s] Executing plugin_init()", PLUGIN_TAG);
 
+    g_msgHideWeapon    = get_user_msgid( "HideWeapon" ); 
+	
 	register_plugin(PLUGIN, VERSION, AUTHOR);
 	register_cvar("hlkreedz_version", VERSION, FCVAR_SPONLY | FCVAR_SERVER | FCVAR_UNLOGGED);
 
@@ -778,6 +792,8 @@ public plugin_init()
 			register_clcmd(callvoteGamemode, "CmdAgVoteHandler");
 		}
 	}
+
+    register_event( "ResetHUD", "eResetHUD", "be" ); 
 
 	register_clcmd("+hook",					"CheatCmdHandler");
 	register_clcmd("-hook",					"CheatCmdHandler");
@@ -1814,6 +1830,8 @@ public client_putinserver(id)
 	g_LapTimes[id] = ArrayCreate();
 	g_CurrentLap[id] = 0;
 
+    g_msgHideWeapon    = get_user_msgid( "HideWeapon" ); 
+
 	g_IsKzVoteRunning[id] = false;
 	g_IsKzVoteVisible[id] = true;
 	g_IsKzVoteIgnoring[id] = false;
@@ -1843,6 +1861,7 @@ public client_putinserver(id)
 
 	g_ReplayFrames[id] = ArrayCreate(REPLAY);
 
+	g_ConsolePrintNextFrames[id] = 1;
 	// Link this player to the cup player
 	new uniqueId[32];
 	GetUserUniqueId(id, uniqueId, charsmax(uniqueId));
@@ -1929,6 +1948,7 @@ public client_disconnect(id)
 
 	// Clear and reset other things
 	ResetPlayer(id, true, false);
+
 
 	g_ControlPoints[id][CP_TYPE_START][CP_VALID] = false;
 }
@@ -2048,6 +2068,12 @@ ResetPlayer(id, bool:onDisconnect = false, bool:onlyTimer = false)
 	UnfreezePlayer(id);
 
 	InitPlayer(id, onDisconnect, onlyTimer);
+	
+	if( !is_user_bot( id ) ) {
+        message_begin( MSG_ONE_UNRELIABLE, g_msgHideWeapon, _, id );
+        write_byte( ( 1 << 3 | 1 << 5 ) );
+        message_end();
+    }
 
 	if (!onDisconnect)
 	{
@@ -2474,12 +2500,12 @@ CmdReplay(id, RUN_TYPE:runType)
 			canceled = true;
 		}
 
-		if (g_ReplayNum >= maxReplays)
+		/*if (g_ReplayNum >= maxReplays)
 		{
 			client_print(id, print_chat, "[%s] Sorry, there are too many replays running! Please, wait until one of the %d replays finish", PLUGIN_TAG, g_ReplayNum);
 			fclose(file);
 			return PLUGIN_HANDLED;
-		}
+		}*/
 		else if (GetOwnersBot(id))
 		{
 			client_print(id, print_chat, "[%s] Your previous bot is still setting up. Please, wait %.1f seconds to start a new replay", PLUGIN_TAG, setupTime);
@@ -2530,7 +2556,7 @@ CmdReplay(id, RUN_TYPE:runType)
 }
 
 
-/*StartGhost(id, RUN_TYPE:runType)
+StartGhost(id, RUN_TYPE:runType)
 {
 	static authid[32], replayFile[256], idNumbers[24], stats[STATS], time[32];
 	new args[32], cmd[15], replayRank, replayArg[33], Regex:pattern;
@@ -2542,11 +2568,17 @@ CmdReplay(id, RUN_TYPE:runType)
 	remove_quotes(args);
 	trim(args);
 	parse(args, cmd, charsmax(cmd), replayArg, charsmax(replayArg));*/
-
+	
 	/*if (is_str_num(replayArg))
 		replayRank = str_to_num(replayArg);
-	else
-	get_user_name(id, replayArg, sizeof(replayArg));
+	else*/
+
+	new name[32];
+
+	GetColorlessName(id, name, charsmax(name));
+	get_user_authid(id, replayArg, charsmax(replayArg));
+
+	//get_user_name(id, replayArg, sizeof(replayArg));
 	
 	pattern = regex_compile_ex(fmt(".*%s.*", replayArg), PCRE_CASELESS);
 
@@ -2556,7 +2588,9 @@ CmdReplay(id, RUN_TYPE:runType)
 	for (new i = 0; i < ArraySize(arr); i++)
 	{
 		ArrayGetArray(arr, i, stats);
-		if ((replayRank && i == replayRank - 1) || (pattern == 1 && regex_match_c(stats[STATS_NAME], pattern) == 1))
+		//client_print(id, print_chat, "[%s] breakin, %s", PLUGIN_TAG, stats[STATS_ID]);
+		
+		if (pattern == 1 && regex_match_c(stats[STATS_ID], pattern) == 1)
 		{
 			stats[STATS_NAME][17] = EOS;
 			formatex(authid, charsmax(authid), "%s", stats[STATS_ID]);
@@ -2568,6 +2602,7 @@ CmdReplay(id, RUN_TYPE:runType)
 
 	new replayingMsg[96], replayFailedMsg[96], szTopType[32];
 	ConvertSteamID32ToNumbers(authid, idNumbers);
+
 	formatex(szTopType, charsmax(szTopType), g_TopType[runType]);
 	strtolower(szTopType);
 	formatex(replayFile, charsmax(replayFile), "%s/%s_%s_%s.dat", g_ReplaysDir, g_Map, idNumbers, szTopType);
@@ -2581,6 +2616,7 @@ CmdReplay(id, RUN_TYPE:runType)
 	ucfirst(szTopType);
 	formatex(replayingMsg, charsmax(replayingMsg), "[%s] Replaying %s's %s run (%ss)", PLUGIN_TAG, stats[STATS_NAME], szTopType, time);
 	formatex(replayFailedMsg, charsmax(replayFailedMsg), "[%s] Sorry, no replay available for %s's %s run", PLUGIN_TAG, stats[STATS_NAME], szTopType);
+	//formatex(replayFailedMsg, charsmax(replayFailedMsg), " %s", replayFile);
 
 	new file = fopen(replayFile, "rb");
 	if (!file && runType == PRO && ComparePro2PureTime(stats[STATS_ID], stats[STATS_TIME]) == 0)
@@ -2595,26 +2631,32 @@ CmdReplay(id, RUN_TYPE:runType)
 	}
 	else
 	{
-		new bool:canceled = false;
-		if (g_ReplayFramesIdx[id])
+			new bool:canceled = false;
+		/*if (g_ReplayFramesIdx[id])
 		{
 			new bot = GetOwnersBot(id);
 			//console_print(1, "CmdReplay :: removing bot %d", bot);
 			FinishReplay(id);
 			KickReplayBot(bot + TASKID_KICK_REPLAYBOT);
 			canceled = true;
-		}
+		}*/
 
-		if (g_ReplayNum >= maxReplays)
+		/*if (g_ReplayNum >= maxReplays)
 		{
 			client_print(id, print_chat, "[%s] Sorry, there are too many replays running! Please, wait until one of the %d replays finish", PLUGIN_TAG, g_ReplayNum);
 			fclose(file);
 			return PLUGIN_HANDLED;
-		}
-		else if (GetOwnersBot(id))
+		}*/
+		if (GetOwnersBot(id))
 		{
-			client_print(id, print_chat, "[%s] Your previous bot is still setting up. Please, wait %.1f seconds to start a new replay", PLUGIN_TAG, setupTime);
+			/*client_print(id, print_chat, "[%s] Your previous bot is still setting up. Please, wait %.1f seconds to start a new replay", PLUGIN_TAG, setupTime);
 			fclose(file);
+			*/
+			g_ReplayFramesIdx[id] = 0;
+			if(file)
+			{
+				fclose(file);
+			}
 			return PLUGIN_HANDLED;
 		}
 
@@ -2649,13 +2691,13 @@ CmdReplay(id, RUN_TYPE:runType)
 		//console_print(id, "%.3f = 1.0 / ((%.3f - %.3f) / %.3f) * %.3f", demoFramerate, replay[RP_TIME], replay0[RP_TIME], float(i), float(g_ReplayFpsMultiplier[id]));
 
 		g_ReplayNum++;
-		SpawnBot(id, );
+		SpawnBot(id, name);
 		client_print(id, print_chat, "[%s] Your bot will start running at %.2f fps (on average) in %.1f seconds", PLUGIN_TAG, demoFramerate, setupTime);
 		//console_print(1, "replayft=%.3f, replay0t=%.2f, i=%d, mult=%d", replay[RP_TIME], replay0[RP_TIME], i, g_ReplayFpsMultiplier[id]);
 	}
 
 	return PLUGIN_HANDLED;
-}*/
+}
 
 
 SpawnBot(id, bot_name_suffix[])
@@ -2718,7 +2760,8 @@ SpawnBot(id, bot_name_suffix[])
 			//console_print(1, "player %d spawned the bot %d", id, bot);
 
 			// TODO: countdown hud; 2 seconds to start the replay, so there's time to switch to spectator
-			entity_set_float(ent, EV_FL_nextthink, get_gametime() + get_pcvar_float(pcvar_kz_replay_setup_time));
+			//entity_set_float(ent, EV_FL_nextthink, get_gametime() + get_pcvar_float(pcvar_kz_replay_setup_time));
+			entity_set_float(ent, EV_FL_nextthink, get_gametime() + 0.0);
 			engfunc(EngFunc_RunPlayerMove, bot, replay[RP_ANGLES], 0.0, 0.0, 0.0, replay[RP_BUTTONS], 0, 4);
 		}
 		else
@@ -2791,7 +2834,7 @@ SpawnDummyBot(id)
 	else
 		client_print(id, print_chat, "[%s] Sorry, won't spawn the bot since there are only 4 slots left for players", PLUGIN_TAG);
 
-    //return PLUGIN_HANDLED;
+    return PLUGIN_HANDLED;
 }
 
 ConfigureBot(id) {
@@ -4183,7 +4226,11 @@ StartTimer(id)
 
 		ShowMessage(id, msg);
 	}
-	//StartGhost(id, PURE);
+
+	if(!get_bit(g_bit_is_bot, id))
+	{
+		StartGhost(id, PURE);
+	}
 	
 
 	new uniqueid[32];
@@ -4229,7 +4276,7 @@ FinishTimer(id)
 
 	//client_cmd(0, "spk fvox/bell");
 	client_cmd(0, "spk ironanjuu/wr");
-
+	
 	get_user_name(id, name, charsmax(name));
 	client_print(0, print_chat, GetVariableDecimalMessage(id, "[%s] %s^0 finished in %02d:%0", "(CPs: %d | TPs: %d) %s%s"),
 		PLUGIN_TAG, name, minutes, seconds, g_CpCounters[id][COUNTER_CP], g_CpCounters[id][COUNTER_TP], pureRun, g_RunMode[id] == MODE_NORESET ? " No-Reset" : "");
@@ -4365,6 +4412,13 @@ FinishTimer(id)
 		g_RecordRun[id] = 0;
 		ArrayClear(g_RunFrames[id]);
 	}
+
+
+	new bot = GetOwnersBot(id);
+	//console_print(1, "CmdReplay :: removing bot %d", bot);
+	FinishReplay(id);
+	KickReplayBot(bot + TASKID_KICK_REPLAYBOT);
+
 }
 
 SplitTime(id, ent)
@@ -4938,7 +4992,8 @@ UpdateHud(Float:currGameTime)
 			kztime = get_bit(g_baIsPaused, targetId) ? g_PlayerTimePause[targetId] - g_PlayerTime[targetId] : currGameTime - g_PlayerTime[targetId];
 
 			min = floatround(kztime / 60.0, floatround_floor);
-			sec = floatround(kztime - min * 60.0, floatround_floor);
+			//sec = floatround(kztime - min * 60.0, floatround_floor);
+			sec = kztime - min * 60.0
 
 			if (g_CpCounters[targetId][COUNTER_CP] || g_CpCounters[targetId][COUNTER_TP])
 				g_RunType[targetId] = "Noob";
@@ -4975,10 +5030,18 @@ UpdateHud(Float:currGameTime)
 				formatex(runModeText, charsmax(runModeText), " %s", g_RunModeString[g_RunMode[targetId]]);
 
 			new timerText[128];
-			formatex(timerText, charsmax(timerText), "%s%s run | Time: %02d:%02d | CPs: %d | TPs: %d%s%s%s%s | Map: %s",
+			if( g_CpCounters[targetId][COUNTER_CP] == 0 && g_CpCounters[targetId][COUNTER_TP] == 0)
+			{
+				formatex(timerText, charsmax(timerText), "%s%s run | Time: %02d:%03.1f%s%s%s%s | Map: %s",
+					g_RunType[targetId], runModeText, min, sec, 
+					reqsText, lapsText, splitText, get_bit(g_baIsPaused, targetId) ? " | *Paused*" : "", g_Map);
+			}
+			else
+			{
+				formatex(timerText, charsmax(timerText), "%s%s run | Time: %02d:%02.2d | CPs: %d | TPs: %d%s%s%s%s | Map: %s",
 					g_RunType[targetId], runModeText, min, sec, g_CpCounters[targetId][COUNTER_CP], g_CpCounters[targetId][COUNTER_TP],
 					reqsText, lapsText, splitText, get_bit(g_baIsPaused, targetId) ? " | *Paused*" : "", g_Map);
-
+			}
 			switch (g_ShowTimer[id])
 			{
 			case 1:
@@ -6139,6 +6202,14 @@ public Fw_FmAddToFullPackPost(es, e, ent, host, hostflags, player, pSet)
 
 	if(get_bit(g_bit_invis, host))
 	{
+		set_es(es, ES_RenderMode, kRenderTransTexture);
+		set_es(es, ES_RenderAmt, 0);
+		set_es(es, ES_Origin, { 999999999.0, 999999999.0, 999999999.0 } );
+		return FMRES_IGNORED;
+	}
+	if(GetOwnersBot(host) != ent && get_bit(g_bit_is_bot, ent)) 
+	{
+		//server_print("[%s] HIDING %d FOR %d ", PLUGIN_TAG, ent, host);
 		set_es(es, ES_RenderMode, kRenderTransTexture);
 		set_es(es, ES_RenderAmt, 0);
 		set_es(es, ES_Origin, { 999999999.0, 999999999.0, 999999999.0 } );
